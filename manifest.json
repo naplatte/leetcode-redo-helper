@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "111",
+  "name": "leetcode重做助手",
+  "version": "0.3.0",
+  "description": "力扣中国站本地复习工具：只恢复有改动的代码，保留未改动模板；切题不额外刷新页面。会覆盖已有代码草稿。",
+  "permissions": ["storage"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "leetcode重做助手",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    },
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.cn/*"],
+      "js": ["dist/page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://leetcode.cn/*"],
+      "css": ["shield.css"],
+      "js": ["guard.js", "dist/content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

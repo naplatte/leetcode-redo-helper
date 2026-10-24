@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>leetcode重做助手：重新开始</title>
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="#1D4ED8"/>
+  <path d="M35 46a34 34 0 1 1-1 37" stroke="#FFF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M35 28v22h22" stroke="#FFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

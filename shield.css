@@ -1,0 +1,75 @@
+/* A short renewable CSS lease hides first paint. If every script fails or is
+   invalidated, it expires on its own instead of leaving a blank editor forever. */
+@keyframes lcr-cover-a {
+  from { visibility: hidden; pointer-events: none; }
+  to { visibility: visible; pointer-events: auto; }
+}
+@keyframes lcr-cover-b {
+  from { visibility: hidden; pointer-events: none; }
+  to { visibility: visible; pointer-events: auto; }
+}
+/* The lease lives on the root, never on the native modal. If all extension
+   scripts stop, the confirmation becomes visible/operable after two seconds. */
+@keyframes lcr-modal-lease-a {
+  from { --lcr-modal-opacity: 0; --lcr-modal-pointer: none; }
+  to { --lcr-modal-opacity: 1; --lcr-modal-pointer: auto; }
+}
+@keyframes lcr-modal-lease-b {
+  from { --lcr-modal-opacity: 0; --lcr-modal-pointer: none; }
+  to { --lcr-modal-opacity: 1; --lcr-modal-pointer: auto; }
+}
+html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"]) :is(.monaco-editor, .cm-editor, .CodeMirror),
+html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"]) .flexlayout__tabset:has(#code_tab) .view-lines {
+  animation: lcr-cover-a 2s steps(1, end) both !important;
+}
+html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"])[data-lcr-lease="b"] :is(.monaco-editor, .cm-editor, .CodeMirror),
+html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"])[data-lcr-lease="b"] .flexlayout__tabset:has(#code_tab) .view-lines {
+  animation-name: lcr-cover-b !important;
+}
+
+/* Preserve the site's enter/exit animations. Modal libraries use animationend
+   to unmount portals and release focus/pointer locks. Replacing their animation
+   can leave an invisible dialog blocking the entire page after a reset. */
+html:not([data-lcr-recovered])[data-lcr-auto-reset="true"] {
+  animation: lcr-modal-lease-a 2s steps(1, end) both !important;
+}
+html:not([data-lcr-recovered])[data-lcr-auto-reset="true"][data-lcr-lease="b"] {
+  animation-name: lcr-modal-lease-b !important;
+}
+html:not([data-lcr-recovered])[data-lcr-auto-reset="true"] :is([role="dialog"], [role="alertdialog"]),
+html:not([data-lcr-recovered])[data-lcr-auto-reset="true"] [data-state="open"].fixed.inset-0,
+html:not([data-lcr-recovered])[data-lcr-auto-reset="true"] [data-state="closed"].fixed.inset-0 {
+  opacity: var(--lcr-modal-opacity, 1) !important;
+  pointer-events: var(--lcr-modal-pointer, auto) !important;
+}
+
+#lcr-notice {
+  all: initial;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2147483647;
+  width: min(340px, calc(100vw - 40px));
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 36px #0f172a26;
+  color: #1e293b;
+  font: 14px/1.65 system-ui, "Microsoft YaHei", sans-serif;
+}
+#lcr-notice * { box-sizing: border-box; }
+#lcr-notice strong { display: block; font-size: 15px; }
+#lcr-notice p { margin: 5px 0 10px; color: #475569; }
+#lcr-notice button {
+  margin: 5px 8px 0 0;
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #0f172a;
+  font: inherit;
+  cursor: pointer;
+}
+#lcr-notice button:first-of-type { background: #0f766e; color: #fff; border-color: #0f766e; }

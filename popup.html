@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>leetcode重做助手</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header class="heading">
+        <img class="brand-mark" src="icons/logo.svg" width="42" height="42" alt="" />
+        <div>
+          <p class="eyebrow">专注这一遍的思路</p>
+          <h1>leetcode重做助手</h1>
+        </div>
+        <span class="local-badge">本地版</span>
+      </header>
+
+      <section class="switch-card" aria-labelledby="enable-label">
+        <div>
+          <h2 id="enable-label">自动恢复初始模板</h2>
+          <p>仅作用于力扣中国站普通题目页</p>
+        </div>
+        <label class="switch">
+          <input id="enabled" type="checkbox" checked aria-labelledby="enable-label" />
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </section>
+
+      <section class="switch-card display-setting" aria-labelledby="page-status-label">
+        <div>
+          <h2 id="page-status-label">显示页面运行提示</h2>
+          <p>在题目页右下角显示进度与异常提示</p>
+        </div>
+        <label class="switch">
+          <input id="show-page-status" type="checkbox" checked aria-labelledby="page-status-label" />
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </section>
+
+      <section id="status-card" class="status-card" data-phase="loading" aria-labelledby="status-title">
+        <div class="status-heading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <h2 id="status-title">正在读取当前页面</h2>
+        </div>
+        <p id="status-message" role="status" aria-live="polite">连接题目页后，这里会显示处理结果。</p>
+        <p id="problem" class="problem" hidden></p>
+      </section>
+
+      <div class="actions">
+        <button id="retry" type="button" class="primary-button" disabled>重新检查并恢复模板</button>
+        <button id="pause" type="button" class="text-button" disabled>显示现有代码并暂停当前页</button>
+      </div>
+
+      <aside class="notice">
+        <strong>开始前请留意</strong>
+        <p>进入题目或切换语言时，已有改动的代码会恢复为初始模板；未改动的模板直接保留。请先用不需要保留草稿的题目试用。</p>
+        <p>“暂停当前页”只解除遮挡，可能显示旧答案；不会恢复已覆盖的草稿。</p>
+      </aside>
+
+      <footer>
+        <span>不上传代码</span>
+        <span aria-hidden="true">·</span>
+        <span>保留题目初始骨架</span>
+      </footer>
+    </main>
+  </body>
+</html>
