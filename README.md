@@ -1,3 +1,5 @@
+<p align="center"><img src="icons/logo.svg" width="80" height="80" alt="leetcode重做助手 Logo" /></p>
+
 # leetcode重做助手
 
 复习力扣题目时，经常会先看到上次写过的代码，有概率会不小心瞄到导致思路被剧透。这个插件会在打开题目时，将有改动的代码恢复为初始模板，方便重新思考和作答。
