@@ -1,11 +1,12 @@
 (() => {
   "use strict";
   // Independent of the controller/core: a failed module must never leave the
-  // editor permanently invisible. The CSS lease is a second, timer-free escape.
+  // editor permanently invisible. Bootstrap CSS also handles a missing module.
   let lastBeat = Date.now();
   let configured = false;
   let stopped = false;
   let showPageStatus = true;
+  let staleSince = null;
   let reason = "自动处理脚本未能正常启动";
 
   function showRecovery() {
@@ -14,6 +15,7 @@
       root.setAttribute("data-lcr-recovered", "true");
       root.setAttribute("data-lcr-visibility", "shown");
       root.removeAttribute("data-lcr-auto-reset");
+      root.removeAttribute("data-lcr-controlled");
     }
     if (!showPageStatus) { document.getElementById("lcr-recovery")?.remove(); return; }
     if (!document.body || document.getElementById("lcr-recovery")) return;
@@ -38,6 +40,7 @@
   document.addEventListener("lcr:controller-alive", (event) => {
     if (stopped) return;
     lastBeat = Date.now();
+    staleSince = null;
     if (event.detail === "configured") configured = true;
   });
   document.addEventListener("lcr:controller-error", (event) => recover(event.detail));
@@ -60,12 +63,19 @@
     } catch { recover("扩展已关闭或重新加载"); return; }
     if (document.hidden || document.documentElement?.hasAttribute("data-lcr-sleeping")) {
       lastBeat = Date.now();
+      staleSince = null;
       return;
     }
-    if ((!configured && Date.now() - started > 1800) || Date.now() - lastBeat > 1800) recover();
+    if ((!configured && Date.now() - started > 1800) || Date.now() - lastBeat > 1800) {
+      // A resumed timer may run before queued focus/visibility/heartbeat tasks.
+      // Give a live controller a new task window rather than revealing old code.
+      staleSince ??= Date.now();
+      if (Date.now() - staleSince >= 1000) recover();
+    } else staleSince = null;
   }, 400);
   function foreground() {
     lastBeat = Date.now();
+    staleSince = null;
     if (!configured) started = lastBeat;
   }
   window.addEventListener("focus", foreground, true);

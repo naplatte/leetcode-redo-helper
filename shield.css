@@ -1,5 +1,5 @@
-/* A short renewable CSS lease hides first paint. If every script fails or is
-   invalidated, it expires on its own instead of leaving a blank editor forever. */
+/* The short bootstrap lease is only for a controller that never starts. After
+   takeover, keep a static mask until verification, pause or independent recovery. */
 @keyframes lcr-cover-a {
   from { opacity: 0; pointer-events: none; }
   to { opacity: 1; pointer-events: auto; }
@@ -18,11 +18,15 @@
   from { --lcr-modal-opacity: 0; --lcr-modal-pointer: none; }
   to { --lcr-modal-opacity: 1; --lcr-modal-pointer: auto; }
 }
-html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"]) #editor :is(.monaco-editor, .cm-editor, .CodeMirror) {
+html:not([data-lcr-controlled]):not([data-lcr-recovered]):not([data-lcr-visibility="shown"]) #editor :is(.monaco-editor, .cm-editor, .CodeMirror) {
   animation: lcr-cover-a 2s steps(1, end) both !important;
 }
-html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"])[data-lcr-lease="b"] #editor :is(.monaco-editor, .cm-editor, .CodeMirror) {
+html:not([data-lcr-controlled]):not([data-lcr-recovered]):not([data-lcr-visibility="shown"])[data-lcr-lease="b"] #editor :is(.monaco-editor, .cm-editor, .CodeMirror) {
   animation-name: lcr-cover-b !important;
+}
+html[data-lcr-controlled="true"]:not([data-lcr-recovered]):not([data-lcr-visibility="shown"]) #editor :is(.monaco-editor, .cm-editor, .CodeMirror) {
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 /* Preserve the site's enter/exit animations. Modal libraries use animationend

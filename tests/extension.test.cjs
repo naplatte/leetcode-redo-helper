@@ -130,7 +130,6 @@ function fixture(mode = "normal") {
     };
     if(fixture.mode==='delayed-confirm'){
       dialog.querySelector('#confirm').disabled=true;
-      setTimeout(()=>dialog.querySelector('#confirm').disabled=false,250);
     }
   });
   fixture.arrive=async(slug)=>{
@@ -190,6 +189,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
   const errors = [];
   async function open(mode = "normal", enabled = true, url = "https://leetcode.cn/problems/two-sum/", variant = "normal", showPageStatus = true) {
     const context = await browser.newContext();
+    context.setDefaultTimeout(5000);
     await context.addInitScript({ content: init(enabled, variant, showPageStatus) });
     const page = await context.newPage();
     page.on("pageerror", (error) => { errors.push(error.message); console.error("fixture page error:", error.message); });
@@ -245,6 +245,8 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       await page.locator('[role="alertdialog"]').waitFor({ state: "attached" });
       assert.equal(await page.locator('[role="alertdialog"]').evaluate(el=>getComputedStyle(el).opacity), "0");
       assert.equal(await page.locator('.fixed.inset-0').evaluate(el=>getComputedStyle(el).opacity), "0");
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      await page.evaluate(()=>{document.querySelector('#confirm').disabled=false;});
       await ready(page);
       assert.equal(await page.evaluate(() => fixture.modalVisible), false);
       await context.close();
@@ -596,13 +598,13 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       await page.waitForFunction(() => harness.status()?.phase === "error", null, { timeout: 25000 });
       assert.equal(await page.evaluate(() => fixture.oldVisible), false);
       assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).opacity), "0");
-      assert.equal(await page.evaluate(() => fixture.resets), 1);
+      assert.equal(await page.evaluate(() => fixture.resets), 2, "At most one automatic recovery attempt");
       await page.evaluate(() => harness.command("LCR_PAUSE_TAB"));
       assert.equal((await phase(page)).phase, "paused");
       assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).opacity), "1");
       await page.evaluate(() => { fixture.mode="normal"; return harness.command("LCR_RETRY"); });
       await ready(page);
-      assert.equal(await page.evaluate(() => fixture.resets), 2);
+      assert.equal(await page.evaluate(() => fixture.resets), 3);
       await context.close();
     });
     assert.deepEqual(errors, [], "No uncaught page errors");

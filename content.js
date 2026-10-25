@@ -18,6 +18,7 @@
   let lease = "a";
   let inactiveQuestion = problemFromUrl(location.href) ? null : questionFromUrl(location.href);
   let suspendedAt = null;
+  const extensionVersion = (() => { try { return chrome.runtime.getManifest().version || "unknown"; } catch { return "unknown"; } })();
   let status = { enabled: true, phase: "loading", message: "正在准备编辑器…", problem: null };
   const WAIT_MS = 20000;
   const QUIET_MS = 300;
@@ -25,6 +26,9 @@
   const NOTICE_DELAY_MS = 450;
   const DIALOG_SETTLE_MS = 150;
   const INITIAL_DRAFT_WATCH_MS = 2500;
+  const EDITOR_SETTLE_MS = 200;
+  const VERIFY_RETRY_MS = 1000;
+  const MAX_RESET_ATTEMPTS = 2;
 
   function syncVisibility() {
     const root = document.documentElement;
@@ -39,6 +43,10 @@
       root.removeAttribute("data-lcr-auto-reset");
       return;
     }
+    // Once the controller owns the mask, only an explicit decision may uncover
+    // the editor. A compositor animation must never reveal an unverified answer.
+    root.setAttribute("data-lcr-controlled", "true");
+    root.setAttribute("data-lcr-version", extensionVersion);
     document.dispatchEvent(new CustomEvent("lcr:controller-alive", { detail: configured ? "configured" : "starting" }));
     if (wantsVisible && root.getAttribute("data-lcr-visibility") !== "shown") root.setAttribute("data-lcr-visibility", "shown");
     if (!wantsVisible && root.hasAttribute("data-lcr-visibility")) root.removeAttribute("data-lcr-visibility");
@@ -65,7 +73,11 @@
     if (suspendedAt !== null) {
       const now = Date.now();
       for (const job of [session, pendingNavigation]) {
-        if (typeof job?.started === "number") job.started += Math.max(0, now - Math.max(job.started, suspendedAt));
+        if (!job) continue;
+        const duration = Math.max(0, now - Math.max(job.started || suspendedAt, suspendedAt));
+        for (const key of ["started", "verifyFailedSince", "stableSince", "confirmAfter", "watchUntil"]) {
+          if (typeof job[key] === "number" && job[key] > 0) job[key] += duration;
+        }
       }
       if (session && session.step !== "ready") session.matchedSince = 0;
       suspendedAt = null;
@@ -275,8 +287,12 @@
     if (!panel) return null;
     const monaco = panel.querySelector(".monaco-editor .view-lines");
     if (monaco) {
-      const lines = monaco.querySelectorAll(".view-line");
-      return lines.length ? Array.from(lines, (line) => line.textContent).join("\n") : null;
+      // Monaco recycles absolutely positioned row nodes. Their insertion order
+      // can differ from their visual order after scrolling or replacing a model.
+      const lines = Array.from(monaco.querySelectorAll(".view-line"))
+        .map((line, index) => ({ line, index, top: Number.parseFloat(line.style.top) }))
+        .sort((a, b) => Number.isFinite(a.top) && Number.isFinite(b.top) ? a.top - b.top : a.index - b.index);
+      return lines.length ? lines.map(({ line }) => line.textContent).join("\n") : null;
     }
     const cm = panel.querySelector(".cm-editor .cm-content");
     if (cm && !cm.querySelector(".cm-gap")) {
@@ -290,6 +306,7 @@
   function matchesTemplate(active) {
     if (!active?.snippet || currentLanguage() !== active.language) return false;
     active.modelAvailable = false;
+    active.possiblyPartial = false;
     let result;
     const id = `lcr-${active.id}`;
     const receive = (event) => {
@@ -297,6 +314,7 @@
         const data = JSON.parse(event.detail);
         if (data.id === id && data.available) {
           active.modelAvailable = true;
+          active.verificationSource = data.source || "editor-model";
           result = data.match;
         }
       } catch { /* Ignore unrelated page events. */ }
@@ -304,9 +322,19 @@
     document.addEventListener("lcr:verified", receive);
     document.dispatchEvent(new CustomEvent("lcr:verify", { detail: JSON.stringify({ id, code: active.snippet.code }) }));
     document.removeEventListener("lcr:verified", receive);
-    if (result !== undefined) return result;
+    if (result !== undefined) {
+      document.documentElement?.setAttribute("data-lcr-editor-source", active.verificationSource);
+      return result;
+    }
+    active.verificationSource = "rendered-lines";
+    document.documentElement?.setAttribute("data-lcr-editor-source", active.verificationSource);
     const rendered = renderedCode();
-    return rendered !== null && normalizeCode(rendered) === normalizeCode(active.snippet.code);
+    const actual = normalizeCode(rendered);
+    const expected = normalizeCode(active.snippet.code);
+    // A visible window into a long pristine template is not evidence of an
+    // edited solution. Wait for a full model instead of resetting it blindly.
+    active.possiblyPartial = !!actual && actual !== expected && expected.includes(actual);
+    return rendered !== null && actual === expected;
   }
 
   function fail(message) {
@@ -342,7 +370,7 @@
     markAutoReset(false);
     cover();
     session = { id: ++serial, slug, language, started: Date.now(), step: "waiting",
-      clicked: false, confirmed: false, matchedSince: 0, attempts: 0, edited: false, failed: false };
+      clicked: false, confirmed: false, matchedSince: 0, attempts: 0, resetCount: 0, edited: false, failed: false };
     notify("loading", "代码区已遮住，正在等待初始模板…", slug);
     schedule();
   }
@@ -398,7 +426,7 @@
       active.lastSnapshot = editorSnapshot();
       // The site can finish loading a cloud draft after the first reset. While
       // the user has not edited anything, hide and reset again before painting.
-      if (!active.edited && Date.now() < active.watchUntil && renderedCode() !== null && !matchesTemplate(active)) {
+      if (!active.edited && Date.now() < active.watchUntil && renderedCode() !== null && !matchesTemplate(active) && !active.possiblyPartial) {
         if (!document.querySelector("#editor .monaco-editor, #editor .cm-editor, #editor .CodeMirror")) return;
         cover();
         if (active.attempts >= 3) { fail("网站反复恢复了旧代码，已保持遮挡。请重试或暂停此页。"); return; }
@@ -442,7 +470,21 @@
       // SSR controls may exist before hydration has attached their handlers.
       // Wait for the actual editor to render before invoking the site's action.
       if (!button) { waitingFor(active, "未找到恢复模板按钮"); return; }
+      if (active.possiblyPartial) { waitingFor(active, "正在读取完整的编辑器内容"); return; }
       if (renderedCode() === null && !active.modelAvailable) { waitingFor(active, "正在等待编辑器完成初始化"); return; }
+      const snapshot = editorSnapshot();
+      if (active.stableNode !== snapshot.node || active.stableCode !== snapshot.code) {
+        active.stableNode = snapshot.node;
+        active.stableCode = snapshot.code;
+        active.stableSince = Date.now();
+        waitingFor(active, "正在等待编辑器状态稳定");
+        return;
+      }
+      if (Date.now() - active.stableSince < EDITOR_SETTLE_MS) return;
+      if (active.resetCount >= MAX_RESET_ATTEMPTS) {
+        fail("网站反复载入旧代码，已保持遮挡。请重试或暂停此页。");
+        return;
+      }
       // Never interact with an unrelated confirmation dialog.
       if (Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"], dialog[open], [aria-modal="true"]'))
         .some(visibleDialog)) { waitingFor(active, "请先关闭页面上其他弹窗"); return; }
@@ -450,6 +492,8 @@
       active.waitReason = "已点击恢复按钮，未出现预期的确认框";
       active.clicked = true;
       active.skippedReset = false;
+      active.resetCount += 1;
+      active.verifyFailedSince = 0;
       notify("resetting", "正在恢复当前语言的初始模板…");
       markAutoReset(true);
       button.click();
@@ -479,7 +523,27 @@
       return;
     }
     if (active.step === "verifying") {
-      if (resetDialog() || !matchesTemplate(active)) { active.matchedSince = 0; return; }
+      if (resetDialog()) { active.matchedSince = 0; return; }
+      if (!matchesTemplate(active)) {
+        active.matchedSince = 0;
+        active.verifyFailedSince ||= Date.now();
+        // During a cold load, the native reset can run before the site's editor
+        // state is ready, or a late draft can replace its result before paint.
+        // Retry only our initial operation, with a strict cap and no user edits.
+        if (active.confirmed && !active.edited && !active.possiblyPartial && active.resetCount < MAX_RESET_ATTEMPTS
+          && Date.now() - active.verifyFailedSince >= VERIFY_RETRY_MS) {
+          active.step = "waiting";
+          active.clicked = false;
+          active.confirmed = false;
+          active.dialogNode = null;
+          active.stableNode = null;
+          active.verifyFailedSince = 0;
+          notify("resetting", "网站初始化尚未稳定，正在重新恢复模板…");
+          schedule();
+        }
+        return;
+      }
+      active.verifyFailedSince = 0;
       if (pageInteractionBlocked()) {
         active.matchedSince = 0;
         active.waitReason = "模板已恢复，正在等待网站解除弹窗交互锁";

@@ -28,6 +28,29 @@
 
   // Read-only verification where an editor exposes its own model. Only a boolean
   // result crosses the bridge; solution text is never included in an event.
+  function mountedEditor(panel) {
+    // LeetCode's bundled Monaco need not publish window.monaco. Its React
+    // wrapper keeps the mounted editor in a ref. Read only that narrowly scoped
+    // ref chain; do not traverse arbitrary component state or retain solutions.
+    const target = panel?.querySelector(".monaco-editor");
+    let node = target;
+    for (let ancestors = 0; node && panel?.contains(node) && ancestors < 16; ancestors++, node = node.parentElement) {
+      const key = Object.getOwnPropertyNames(node).find(name => name.startsWith("__reactFiber$"));
+      if (!key) continue;
+      let fiber = node[key];
+      for (let depth = 0; fiber && depth < 40; depth++, fiber = fiber.return) {
+        let hook = fiber.memoizedState;
+        for (let count = 0; hook && count < 60; count++, hook = hook.next) {
+          const candidate = hook.memoizedState?.current;
+          if (typeof candidate?.getDomNode === "function" && typeof candidate.getValue === "function"
+            && candidate.getDomNode() === target) return candidate;
+        }
+      }
+      break;
+    }
+    return null;
+  }
+
   document.addEventListener("lcr:verify", (event) => {
     let request;
     try { request = JSON.parse(event.detail); } catch { return; }
@@ -45,6 +68,10 @@
         const uri = panel?.querySelector(".monaco-editor[data-uri]")?.getAttribute("data-uri");
         const model = uri && window.monaco?.editor?.getModels?.().find(item => item.uri?.toString() === uri);
         if (model) { value = model.getValue(); source = "monaco-model"; }
+      }
+      if (value === undefined && panel) {
+        const mounted = mountedEditor(panel);
+        if (mounted) { value = mounted.getValue(); source = "monaco-component-ref"; }
       }
       if (value === undefined && panel) {
         for (const node of panel.querySelectorAll(".cm-content, .cm-editor, .cm-line")) {

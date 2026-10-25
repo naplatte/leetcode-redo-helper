@@ -38,12 +38,12 @@ test("production bundles run in distinct Chrome MAIN and ISOLATED worlds without
       </body></html>`;
     const shim = `(() => {
       const handlers=[],changes=[],timers=[];
-      const interval=window.setInterval;window.setInterval=(...args)=>{const id=interval(...args);timers.push(id);return id;};
+      const interval=window.setInterval;window.setInterval=(fn,...args)=>{const id=interval(fn,...args);timers.push({id,fn});return id;};
       window.chrome={runtime:{getManifest(){return {};},onMessage:{addListener(fn){handlers.push(fn);}}},
         storage:{local:{get(){return Promise.resolve({enabled:true});}},onChanged:{addListener(fn){changes.push(fn);}}}};
       window.harness={status(){let result;for(const fn of handlers)fn({type:'LCR_GET_STATUS'},{},v=>result=v);return result;},
         configure(enabled){changes.forEach(fn=>fn({enabled:{newValue:enabled}},'local'));},
-        stopAllTimers(){timers.forEach(id=>clearInterval(id));}};
+        stopControllerTimer(){timers.filter(item=>item.fn.name==='schedule').forEach(item=>clearInterval(item.id));}};
     })();`;
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: "window.module={exports:{}};\n" + fs.readFileSync(path.join(root, "dist/page-bridge.js"), "utf8") });
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { worldName: "lcr-regression-isolated",
@@ -80,12 +80,12 @@ test("production bundles run in distinct Chrome MAIN and ISOLATED worlds without
     assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "1");
     assert.equal(await page.evaluate(() => fixture.resets), 1);
 
-    // Even if every content-script timer disappears during extension invalidation,
-    // the browser's own CSS animation restores the editor after two seconds.
+    // A stalled controller is released by the independent guard, never by a
+    // compositor timer that could accidentally reveal an unverified answer.
     await page.evaluate(() => { fixture.noReset=true; });
     await isolated("harness.configure(true)");
     await page.waitForFunction(() => fixture.confirmations===2);
-    await isolated("harness.stopAllTimers()");
+    await isolated("harness.stopControllerTimer()");
     await page.waitForFunction(() => getComputedStyle(document.querySelector('.monaco-editor')).opacity==='1', null, {timeout:5000});
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }

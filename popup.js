@@ -144,6 +144,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 async function initialize() {
   try {
+    const version = chrome.runtime?.getManifest?.().version;
+    if (version) document.getElementById("version").textContent = `v${version}`;
     const settings = await chrome.storage.local.get({ enabled: true, showPageStatus: true });
     globalEnabled = settings.enabled !== false;
     enabledInput.checked = globalEnabled;
