@@ -23,7 +23,7 @@ test("real MV3 package starts in separate Chrome worlds and recovers when disabl
   manifest.permissions.push("tabs", "management");
   fs.writeFileSync(path.join(extension, "manifest.json"), JSON.stringify(manifest));
   fs.writeFileSync(path.join(extension, "test-worker.js"), "chrome.runtime.onInstalled.addListener(() => {});");
-  for (const file of ["guard.js", "shield.css", "popup.html", "popup.js", "popup.css", "dist/content.js", "dist/page-bridge.js"]) {
+  for (const file of ["guard.js", "shield.css", "popup.html", "popup.js", "popup.css", "dist/content.js", "dist/page-bridge.js", "icons/logo.svg", ...Object.values(manifest.icons)]) {
     fs.mkdirSync(path.dirname(path.join(extension, file)), { recursive: true });
     fs.copyFileSync(path.join(root, file), path.join(extension, file));
   }
@@ -79,17 +79,17 @@ test("real MV3 package starts in separate Chrome worlds and recovers when disabl
     await phase("idle");
     await page.evaluate((value) => fixture.render(value), previous);
     await page.waitForTimeout(400);
-    assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "visible");
+    assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "1");
     assert.equal(await page.evaluate(() => fixture.resets), 1);
 
     // Start a reset that cannot complete, then disable the actual extension.
     await page.evaluate(() => { fixture.noReset=true; });
     await worker.evaluate(() => chrome.storage.local.set({ enabled: true }));
     await page.waitForFunction(() => fixture.confirmations===2);
-    assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "hidden");
+    assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "0");
     const disabling = worker.evaluate(() => chrome.management.setEnabled(chrome.runtime.id, false)).catch(() => {});
     await Promise.race([disabling, new Promise((resolve) => setTimeout(resolve, 500))]);
-    await page.waitForFunction(() => getComputedStyle(document.querySelector('.monaco-editor')).visibility === 'visible', null, { timeout: 5000 });
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('.monaco-editor')).opacity === '1', null, { timeout: 5000 });
     assert.deepEqual(errors, []);
   } finally {
     await context?.close();

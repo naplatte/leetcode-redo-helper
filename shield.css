@@ -1,12 +1,12 @@
 /* A short renewable CSS lease hides first paint. If every script fails or is
    invalidated, it expires on its own instead of leaving a blank editor forever. */
 @keyframes lcr-cover-a {
-  from { visibility: hidden; pointer-events: none; }
-  to { visibility: visible; pointer-events: auto; }
+  from { opacity: 0; pointer-events: none; }
+  to { opacity: 1; pointer-events: auto; }
 }
 @keyframes lcr-cover-b {
-  from { visibility: hidden; pointer-events: none; }
-  to { visibility: visible; pointer-events: auto; }
+  from { opacity: 0; pointer-events: none; }
+  to { opacity: 1; pointer-events: auto; }
 }
 /* The lease lives on the root, never on the native modal. If all extension
    scripts stop, the confirmation becomes visible/operable after two seconds. */
@@ -18,12 +18,10 @@
   from { --lcr-modal-opacity: 0; --lcr-modal-pointer: none; }
   to { --lcr-modal-opacity: 1; --lcr-modal-pointer: auto; }
 }
-html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"]) :is(.monaco-editor, .cm-editor, .CodeMirror),
-html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"]) .flexlayout__tabset:has(#code_tab) .view-lines {
+html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"]) #editor :is(.monaco-editor, .cm-editor, .CodeMirror) {
   animation: lcr-cover-a 2s steps(1, end) both !important;
 }
-html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"])[data-lcr-lease="b"] :is(.monaco-editor, .cm-editor, .CodeMirror),
-html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"])[data-lcr-lease="b"] .flexlayout__tabset:has(#code_tab) .view-lines {
+html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"])[data-lcr-lease="b"] #editor :is(.monaco-editor, .cm-editor, .CodeMirror) {
   animation-name: lcr-cover-b !important;
 }
 
@@ -41,6 +39,13 @@ html:not([data-lcr-recovered])[data-lcr-auto-reset="true"] [data-state="open"].f
 html:not([data-lcr-recovered])[data-lcr-auto-reset="true"] [data-state="closed"].fixed.inset-0 {
   opacity: var(--lcr-modal-opacity, 1) !important;
   pointer-events: var(--lcr-modal-pointer, auto) !important;
+}
+
+/* Match the lease selectors' specificity so their animation shorthand cannot
+   silently override this pause while background JavaScript is throttled. */
+html:not([data-lcr-recovered])[data-lcr-auto-reset="true"][data-lcr-sleeping="true"][data-lcr-lease],
+html:not([data-lcr-recovered]):not([data-lcr-visibility="shown"])[data-lcr-sleeping="true"][data-lcr-lease] #editor :is(.monaco-editor, .cm-editor, .CodeMirror) {
+  animation-play-state: paused !important;
 }
 
 #lcr-notice {

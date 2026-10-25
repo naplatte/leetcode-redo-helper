@@ -53,11 +53,22 @@
       if (stopped) showRecovery();
     }).catch(() => {});
   } catch { /* Recovery must work even when extension settings are unavailable. */ }
-  const started = Date.now();
+  let started = Date.now();
   const timer = setInterval(() => {
     try {
       if (typeof chrome.runtime.getManifest === "function") chrome.runtime.getManifest();
     } catch { recover("扩展已关闭或重新加载"); return; }
+    if (document.hidden || document.documentElement?.hasAttribute("data-lcr-sleeping")) {
+      lastBeat = Date.now();
+      return;
+    }
     if ((!configured && Date.now() - started > 1800) || Date.now() - lastBeat > 1800) recover();
   }, 400);
+  function foreground() {
+    lastBeat = Date.now();
+    if (!configured) started = lastBeat;
+  }
+  window.addEventListener("focus", foreground, true);
+  window.addEventListener("pageshow", foreground, true);
+  document.addEventListener("visibilitychange", foreground, true);
 })();

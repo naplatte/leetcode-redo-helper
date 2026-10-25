@@ -18,6 +18,17 @@ const module = { exports: {} };
     }
   }
 
+  // Question identity survives switching between its description, result,
+  // solution and submissions views. Only problemFromUrl authorizes a reset.
+  function questionFromUrl(value) {
+    try {
+      const url = new URL(value, "https://leetcode.cn");
+      if (url.origin !== "https://leetcode.cn") return null;
+      const match = url.pathname.match(/^\/problems\/([^/]+)(?:\/|$)/);
+      return match ? decodeURIComponent(match[1]) : null;
+    } catch { return null; }
+  }
+
   function normalizeCode(value) {
     return String(value || "").replace(/[\s\u00a0\u200b\u200c\u200d\ufeff]/g, "");
   }
@@ -51,7 +62,7 @@ const module = { exports: {} };
     return found;
   }
 
-  const api = { problemFromUrl, normalizeCode, validSnippets, collectTemplates };
+  const api = { problemFromUrl, questionFromUrl, normalizeCode, validSnippets, collectTemplates };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.LeetcodeClearCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
@@ -101,6 +112,11 @@ return module.exports;
       const editors = window.monaco?.editor?.getEditors?.() || [];
       const editor = editors.find((item) => panel?.contains(item.getDomNode?.()));
       if (editor) { value = editor.getValue(); source = "monaco-model"; }
+      if (value === undefined) {
+        const uri = panel?.querySelector(".monaco-editor[data-uri]")?.getAttribute("data-uri");
+        const model = uri && window.monaco?.editor?.getModels?.().find(item => item.uri?.toString() === uri);
+        if (model) { value = model.getValue(); source = "monaco-model"; }
+      }
       if (value === undefined && panel) {
         for (const node of panel.querySelectorAll(".cm-content, .cm-editor, .cm-line")) {
           const view = node.cmView?.view || node.cmView?.rootView?.view;

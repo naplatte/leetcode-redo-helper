@@ -77,7 +77,7 @@ test("production bundles run in distinct Chrome MAIN and ISOLATED worlds without
     await isolated("harness.configure(false)");
     await page.evaluate((value) => fixture.render(value), previous);
     await page.waitForTimeout(300);
-    assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "visible");
+    assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "1");
     assert.equal(await page.evaluate(() => fixture.resets), 1);
 
     // Even if every content-script timer disappears during extension invalidation,
@@ -86,7 +86,7 @@ test("production bundles run in distinct Chrome MAIN and ISOLATED worlds without
     await isolated("harness.configure(true)");
     await page.waitForFunction(() => fixture.confirmations===2);
     await isolated("harness.stopAllTimers()");
-    await page.waitForFunction(() => getComputedStyle(document.querySelector('.monaco-editor')).visibility==='visible', null, {timeout:5000});
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('.monaco-editor')).opacity==='1', null, {timeout:5000});
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });

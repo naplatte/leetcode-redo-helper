@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const { problemFromUrl, normalizeCode, collectTemplates, validSnippets } = LeetcodeClearCore;
+  const { problemFromUrl, questionFromUrl, normalizeCode, collectTemplates, validSnippets } = LeetcodeClearCore;
   const templates = new Map();
   let enabled = true;
   let showPageStatus = true;
@@ -16,16 +16,23 @@
   let aborted = false;
   let lastLease = 0;
   let lease = "a";
+  let inactiveQuestion = problemFromUrl(location.href) ? null : questionFromUrl(location.href);
+  let suspendedAt = null;
   let status = { enabled: true, phase: "loading", message: "正在准备编辑器…", problem: null };
   const WAIT_MS = 20000;
   const QUIET_MS = 300;
   const CLEAN_QUIET_MS = 80;
   const NOTICE_DELAY_MS = 450;
   const DIALOG_SETTLE_MS = 150;
+  const INITIAL_DRAFT_WATCH_MS = 2500;
 
   function syncVisibility() {
     const root = document.documentElement;
     if (!root) return;
+    if (document.hidden) {
+      suspendedAt ??= Date.now();
+      root.setAttribute("data-lcr-sleeping", "true");
+    }
     if (aborted || root.hasAttribute("data-lcr-recovered")) {
       aborted = true;
       root.setAttribute("data-lcr-visibility", "shown");
@@ -43,6 +50,32 @@
   }
   function cover() { wantsVisible = false; syncVisibility(); }
   function reveal() { wantsVisible = true; syncVisibility(); }
+  function suspendLease() {
+    const root = document.documentElement;
+    if (!root) return;
+    // Freeze the CSS fail-open clock while Chrome throttles background scripts.
+    suspendedAt ??= Date.now();
+    lastLease = 0;
+    syncVisibility();
+    root.setAttribute("data-lcr-sleeping", "true");
+    if (session?.step === "ready") session.edited = true;
+  }
+  function resumeLease() {
+    if (document.hidden) { suspendLease(); return; }
+    if (suspendedAt !== null) {
+      const now = Date.now();
+      for (const job of [session, pendingNavigation]) {
+        if (typeof job?.started === "number") job.started += Math.max(0, now - Math.max(job.started, suspendedAt));
+      }
+      if (session && session.step !== "ready") session.matchedSince = 0;
+      suspendedAt = null;
+    }
+    // Renew while still paused, before the first foreground frame can paint.
+    lastLease = 0;
+    syncVisibility();
+    document.documentElement?.removeAttribute("data-lcr-sleeping");
+    schedule();
+  }
   function markAutoReset(value) {
     if (value) document.documentElement?.setAttribute("data-lcr-auto-reset", "true");
     else document.documentElement?.removeAttribute("data-lcr-auto-reset");
@@ -89,11 +122,24 @@
     cancelOwnedDialog();
     markAutoReset(false);
     paused = true;
+    inactiveQuestion = questionFromUrl(location.href);
     serial += 1;
     session = null;
     pendingNavigation = null;
     reveal();
     notify("paused", "当前页面已暂停，现有代码已显示。");
+  }
+
+  function preserveWork(slug, message = "已保留当前题目的代码，不再自动重置。") {
+    if (!slug) return;
+    cancelOwnedDialog();
+    markAutoReset(false);
+    pendingNavigation = null;
+    if (session?.slug !== slug) session = { id: ++serial, slug, language: currentLanguage() };
+    Object.assign(session, { step: "ready", edited: true, failed: false,
+      lastSnapshot: editorSnapshot() });
+    reveal();
+    notify(paused ? "paused" : "ready", message, slug);
   }
 
   function retryPage() {
@@ -243,12 +289,16 @@
 
   function matchesTemplate(active) {
     if (!active?.snippet || currentLanguage() !== active.language) return false;
+    active.modelAvailable = false;
     let result;
     const id = `lcr-${active.id}`;
     const receive = (event) => {
       try {
         const data = JSON.parse(event.detail);
-        if (data.id === id && data.available) result = data.match;
+        if (data.id === id && data.available) {
+          active.modelAvailable = true;
+          result = data.match;
+        }
       } catch { /* Ignore unrelated page events. */ }
     };
     document.addEventListener("lcr:verified", receive);
@@ -316,9 +366,28 @@
     if (aborted) return;
     paintNotice();
     if (!configured || !enabled || paused) return;
+    if (document.hidden) return;
     if (pendingNavigation) { arriveIfReady(); return; }
     const slug = problemFromUrl(location.href);
-    if (!slug) { if (session) start(true); return; }
+    if (!slug) {
+      const identity = questionFromUrl(location.href);
+      if (session?.slug === identity) {
+        preserveWork(identity);
+      } else if (session) {
+        cancelOwnedDialog();
+        markAutoReset(false);
+        session = null;
+        reveal();
+        notify("idle", "此页面无需处理。", null);
+      }
+      inactiveQuestion = identity;
+      return;
+    }
+    if (!session && inactiveQuestion === slug) {
+      inactiveQuestion = null;
+      preserveWork(slug);
+      return;
+    }
     if (!session) { start(); return; }
     const active = session;
     if (active.slug !== slug) { beginNavigation(location.href, active.lastSnapshot); return; }
@@ -329,7 +398,7 @@
       active.lastSnapshot = editorSnapshot();
       // The site can finish loading a cloud draft after the first reset. While
       // the user has not edited anything, hide and reset again before painting.
-      if (!active.edited && !matchesTemplate(active)) {
+      if (!active.edited && Date.now() < active.watchUntil && renderedCode() !== null && !matchesTemplate(active)) {
         if (!document.querySelector("#editor .monaco-editor, #editor .cm-editor, #editor .CodeMirror")) return;
         cover();
         if (active.attempts >= 3) { fail("网站反复恢复了旧代码，已保持遮挡。请重试或暂停此页。"); return; }
@@ -373,7 +442,7 @@
       // SSR controls may exist before hydration has attached their handlers.
       // Wait for the actual editor to render before invoking the site's action.
       if (!button) { waitingFor(active, "未找到恢复模板按钮"); return; }
-      if (renderedCode() === null) { waitingFor(active, "正在等待编辑器完成初始化"); return; }
+      if (renderedCode() === null && !active.modelAvailable) { waitingFor(active, "正在等待编辑器完成初始化"); return; }
       // Never interact with an unrelated confirmation dialog.
       if (Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"], dialog[open], [aria-modal="true"]'))
         .some(visibleDialog)) { waitingFor(active, "请先关闭页面上其他弹窗"); return; }
@@ -419,6 +488,7 @@
       if (!active.matchedSince) active.matchedSince = Date.now();
       if (Date.now() - active.matchedSince >= (active.skippedReset ? CLEAN_QUIET_MS : QUIET_MS)) {
         active.step = "ready";
+        active.watchUntil ??= Date.now() + INITIAL_DRAFT_WATCH_MS;
         active.lastSnapshot = editorSnapshot();
         markAutoReset(false);
         reveal();
@@ -432,6 +502,7 @@
     try { data = JSON.parse(event.detail); } catch { return; }
     if (!enabled || !configured) return;
     const target = problemFromUrl(data.url);
+    const identity = questionFromUrl(data.url);
     if (data.phase === "cancel" && pendingNavigation?.slug === target) {
       const previous = pendingNavigation.previous;
       if (problemFromUrl(location.href) !== target) {
@@ -446,6 +517,19 @@
       }
       return;
     }
+    // A result/solution/submissions view is still the same question. Keeping
+    // this session also keeps the trusted user-edit flag across temporary URLs.
+    if (!pendingNavigation && identity && identity === session?.slug) {
+      if (!target) preserveWork(identity);
+      return;
+    }
+    if (!pendingNavigation && target && inactiveQuestion === target) {
+      if (["commit", "complete"].includes(data.phase)) {
+        inactiveQuestion = null;
+        preserveWork(target);
+      }
+      return;
+    }
     if (target) {
       beginNavigation(data.url);
       if (pendingNavigation?.slug === target && ["commit", "complete"].includes(data.phase)) {
@@ -457,6 +541,7 @@
       markAutoReset(false);
       pendingNavigation = null;
       session = null;
+      inactiveQuestion = identity;
       reveal();
       notify("idle", "此页面无需处理。", null);
     }
@@ -471,6 +556,11 @@
 
   // Cover before a language selection can replace the code in the same task.
   document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("button") : null;
+    if (enabled && event.isTrusted && button?.matches('[data-e2e-locator="console-submit-button"], [data-e2e-locator="console-run-button"]')) {
+      preserveWork(questionFromUrl(location.href));
+      return;
+    }
     const option = event.target instanceof Element
       ? event.target.closest('[data-e2e-locator="lang-option"][data-e2e-lang]') : null;
     if (enabled && !paused && option && session) {
@@ -480,17 +570,32 @@
   }, true);
 
   function userEdited(event) {
-    if (!session || session.step !== "ready" || !event.isTrusted) return;
+    if (!enabled || !event.isTrusted) return;
     if (event.target instanceof Element
-      && event.target.closest("#editor .monaco-editor, #editor .cm-editor, #editor .CodeMirror")) session.edited = true;
+      && event.target.closest("#editor .monaco-editor, #editor .cm-editor, #editor .CodeMirror")) {
+      const slug = questionFromUrl(location.href);
+      if (session?.step === "ready" && session.slug === slug) session.edited = true;
+      else if (["beforeinput", "input", "paste", "cut", "keydown"].includes(event.type)) preserveWork(slug);
+    }
   }
   for (const name of ["beforeinput", "input", "paste", "cut", "keydown", "pointerdown", "wheel"]) {
     document.addEventListener(name, userEdited, true);
   }
 
-  window.addEventListener("pagehide", () => { if (enabled && !paused && problemFromUrl(location.href)) cover(); });
+  document.addEventListener("keydown", (event) => {
+    if (enabled && event.isTrusted && event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      preserveWork(questionFromUrl(location.href));
+    }
+  }, true);
+  window.addEventListener("blur", suspendLease);
+  window.addEventListener("focus", resumeLease);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) suspendLease();
+    else resumeLease();
+  });
+  window.addEventListener("pagehide", suspendLease);
   window.addEventListener("pageshow", (event) => {
-    if (event.persisted) { pendingNavigation = null; paused = false; start(true); }
+    if (event.persisted) resumeLease();
   });
   document.addEventListener("DOMContentLoaded", () => { paintNotice(); schedule(); });
 

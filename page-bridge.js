@@ -41,6 +41,11 @@
       const editors = window.monaco?.editor?.getEditors?.() || [];
       const editor = editors.find((item) => panel?.contains(item.getDomNode?.()));
       if (editor) { value = editor.getValue(); source = "monaco-model"; }
+      if (value === undefined) {
+        const uri = panel?.querySelector(".monaco-editor[data-uri]")?.getAttribute("data-uri");
+        const model = uri && window.monaco?.editor?.getModels?.().find(item => item.uri?.toString() === uri);
+        if (model) { value = model.getValue(); source = "monaco-model"; }
+      }
       if (value === undefined && panel) {
         for (const node of panel.querySelectorAll(".cm-content, .cm-editor, .cm-line")) {
           const view = node.cmView?.view || node.cmView?.rootView?.view;

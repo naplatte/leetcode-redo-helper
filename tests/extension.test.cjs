@@ -16,6 +16,14 @@ test("only ordinary China-site problem URLs are accepted", () => {
   }
 });
 
+test("question identity is stable across description, solutions and submission views", () => {
+  for (const path of ["/problems/two-sum/", "/problems/two-sum/description/", "/problems/two-sum/submissions/123/", "/problems/two-sum/solutions/"]) {
+    assert.equal(core.questionFromUrl(path), "two-sum");
+  }
+  assert.equal(core.questionFromUrl("https://leetcode.com/problems/two-sum/"), null);
+  assert.equal(core.questionFromUrl("/contest/weekly/problems/two-sum/"), null);
+});
+
 test("starter templates retain their own question identity", () => {
   const data = { queries: ["alpha", "beta"].map((slug) => ({
     queryKey: ["questionDetail", { titleSlug: slug }],
@@ -64,6 +72,7 @@ function fixture(mode = "normal") {
   <body><h1><a href="/problems/two-sum/">两数之和</a></h1><button id="debug-reset" aria-label="重置">调试器重置</button>
   <a id="next" href="/problems/add-two-numbers/">下一题</a>
   <button id="interactive-check">交互检查</button>
+  <button id="submit" data-e2e-locator="console-submit-button">提交</button>
   <button data-e2e-locator="lang-option" data-e2e-lang="java" id="java">Java</button>
   <div class="flexlayout__tabset"><div id="code_tab">代码</div><div id="editor">
   <button data-e2e-locator="lang-selector-button" data-e2e-lang="cpp">C++</button>
@@ -74,9 +83,13 @@ function fixture(mode = "normal") {
     mode:${JSON.stringify(mode)}, cpp:${JSON.stringify(cpp)}, otherCpp:${JSON.stringify(otherCpp)}, java:${JSON.stringify(java)},
     slug:'two-sum', modelId:1, navigationDelay:0, cleanTarget:false, documentMarker:Math.random() };
   fixture.setCode = (code) => {
+    fixture.modelCode=code;
+    if(fixture.mode==='render-sensitive' && fixture.confirms>0 && getComputedStyle(document.querySelector('.monaco-editor')).visibility==='hidden')return;
     const lines=document.querySelector('.view-lines'); lines.replaceChildren();
-    code.split('\\n').forEach(text=>{const line=document.createElement('div');line.className='view-line';line.textContent=text||'\\u00a0';lines.appendChild(line);});
+    const visibleLines=fixture.mode==='virtual-model'?code.split('\\n').slice(1,3):code.split('\\n');
+    visibleLines.forEach(text=>{const line=document.createElement('div');line.className='view-line';line.textContent=text||'\\u00a0';lines.appendChild(line);});
   };
+  if(fixture.mode==='virtual-model')window.monaco={editor:{getModels:()=>[{uri:{toString:()=>document.querySelector('.monaco-editor').getAttribute('data-uri')},getValue:()=>fixture.modelCode}]}};
   fixture.setCode(${["clean", "clean-format"].includes(mode) ? JSON.stringify(mode === "clean-format" ? cpp.replace(/    /g, "\t") : cpp) : JSON.stringify(old)});
   fixture.template = () => document.querySelector('[data-e2e-locator="lang-selector-button"]').getAttribute('data-e2e-lang')==='java'?fixture.java:fixture.slug==='two-sum'?fixture.cpp:fixture.otherCpp;
   document.querySelector('#debug-reset').onclick=()=>fixture.debuggerClicks++;
@@ -123,7 +136,8 @@ function fixture(mode = "normal") {
   fixture.arrive=async(slug)=>{
     const data=await fetch('/_next/data/fixture/problems/'+slug+'/description.json').then(r=>r.json());
     fixture.lastDataSlug=data.pageProps.dehydratedState.queries[0].state.data.question.titleSlug;
-    document.querySelector('h1 a').href='/problems/'+slug+'/';document.querySelector('h1 a').textContent=slug;
+    let heading=document.querySelector('h1 a');if(!heading){heading=document.createElement('a');document.querySelector('h1').appendChild(heading);}
+    heading.href='/problems/'+slug+'/';heading.textContent=slug;
     await new Promise(resolve=>setTimeout(resolve,fixture.navigationDelay));
     fixture.slug=slug;
     document.querySelector('.monaco-editor').setAttribute('data-uri','inmemory://model/'+(++fixture.modelId));
@@ -134,7 +148,17 @@ function fixture(mode = "normal") {
     fixture.arrive('add-two-numbers');
   };
   window.addEventListener('popstate',()=>fixture.arrive(location.pathname.split('/')[2]));
-  function track(){const editor=document.querySelector('.monaco-editor');if(editor&&getComputedStyle(editor).visibility!=='hidden'&&editor.textContent.includes('SECRET_OLD_ANSWER'))fixture.oldVisible=true;
+  document.querySelector('#submit').onclick=()=>{
+    fixture.submits=(fixture.submits||0)+1;
+    const slug=fixture.slug;
+    history.pushState({},'','/problems/'+slug+'/submissions/123/');
+    document.querySelector('h1 a')?.remove();
+    setTimeout(()=>history.replaceState({},'','/problems/'+slug+'/'),40);
+  };
+  document.addEventListener('keydown',event=>{
+    if(event.ctrlKey&&event.key==='Enter')document.querySelector('#submit').click();
+  });
+  function track(){const editor=document.querySelector('.monaco-editor');if(editor&&getComputedStyle(editor).opacity!=='0'&&editor.textContent.includes('SECRET_OLD_ANSWER'))fixture.oldVisible=true;
     if(Array.from(document.querySelectorAll('[role="alertdialog"],.fixed.inset-0')).some(el=>getComputedStyle(el).opacity!=='0'))fixture.modalVisible=true;
     requestAnimationFrame(track);}requestAnimationFrame(track);
   </script></body></html>`;
@@ -142,7 +166,9 @@ function fixture(mode = "normal") {
 
 function init(enabled = true, variant = "normal", showPageStatus = true) {
   return `(() => {
-    const handlers=[]; const changes=[]; let setting=${enabled};let notices=${showPageStatus};let invalidated=false;
+    const handlers=[]; const changes=[];const intervals=[];let setting=${enabled};let notices=${showPageStatus};let invalidated=false;
+    const setNativeInterval=window.setInterval.bind(window);
+    window.setInterval=(fn,...args)=>{const id=setNativeInterval(fn,...args);intervals.push({id,fn});return id;};
     window.module={exports:{}};
     window.chrome={runtime:{getManifest(){if(invalidated)throw Error('Extension context invalidated');return {version:'test'};},onMessage:{addListener(fn){${variant === "partial-startup" ? "throw Error('listener registration failed');" : "handlers.push(fn);"}}}},storage:{
       local:{get(){return ${variant === "storage-error" ? "Promise.reject(Error('storage unavailable'))" : "Promise.resolve({enabled:setting,showPageStatus:notices})"};}},onChanged:{addListener(fn){changes.push(fn);}}
@@ -150,6 +176,7 @@ function init(enabled = true, variant = "normal", showPageStatus = true) {
     window.harness={command(type){return new Promise(resolve=>{for(const fn of handlers)fn({type},{},resolve);});},
       status(){let result;for(const fn of handlers)fn({type:'LCR_GET_STATUS'},{},value=>result=value);return result;},
       invalidate(){invalidated=true;},
+      stopControllerTimer(){intervals.filter(item=>item.fn.name==='schedule').forEach(item=>clearInterval(item.id));},
       pageStatus(value){notices=value;changes.forEach(fn=>fn({showPageStatus:{newValue:value}},'local'));},
       configure(value){const oldValue=setting;setting=value;changes.forEach(fn=>fn({enabled:{oldValue,newValue:value}},'local'));}};
   })();\n` + (variant === "css-only" ? [] : variant === "no-controller"
@@ -274,7 +301,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       const { page, context } = await open("normal",true,"https://leetcode.cn/problems/two-sum/","no-controller",false);
       await page.waitForFunction(()=>document.documentElement.hasAttribute('data-lcr-recovered'));
       assert.equal(await page.locator('#lcr-recovery').count(),0);
-      assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).visibility),'visible');
+      assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).opacity),'1');
       await page.evaluate(()=>harness.pageStatus(true));
       await page.locator('#lcr-recovery').waitFor();
       await page.evaluate(()=>harness.pageStatus(false));
@@ -300,6 +327,138 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       await context.close();
     });
 
+    for (const mode of ["render-sensitive", "virtual-model"]) {
+      await t.test(`${mode}: verify the real template without requiring all virtual DOM lines or hiding the renderer`, async () => {
+        const { page, context } = await open(mode);
+        await ready(page);
+        assert.equal(await page.evaluate(()=>fixture.confirms),1);
+        assert.equal(await page.evaluate(()=>fixture.modelCode),cpp);
+        assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).visibility),'visible');
+        await context.close();
+      });
+    }
+
+    for (const action of ["button", "keyboard"]) {
+      await t.test(`submitting by ${action} preserves user work across temporary result URLs and absent headings`, async () => {
+        const { page, context } = await open();
+        await ready(page);
+        await page.locator('.monaco-editor').click();
+        await page.keyboard.press('Control+End');
+        await page.keyboard.type('// MY_NEW_SOLUTION');
+        const code=await page.locator('.monaco-editor').textContent();
+        if(action==='button')await page.locator('#submit').click();
+        else await page.keyboard.press('Control+Enter');
+        await page.waitForFunction(()=>fixture.submits===1&&location.pathname==='/problems/two-sum/');
+        await page.evaluate(()=>{history.replaceState({submissionResult:true},'',location.href+'?envId=test');});
+        await page.waitForTimeout(450);
+        assert.equal((await phase(page)).phase,'ready');
+        assert.equal(await page.evaluate(()=>fixture.resets),1);
+        assert.equal(await page.locator('.monaco-editor').textContent(),code);
+        assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).opacity),'1');
+        await page.locator('#next').click();
+        await page.waitForFunction(()=>fixture.resets===2);
+        await ready(page);
+        await context.close();
+      });
+    }
+
+    await t.test("returning from a directly opened result view does not reset the same question", async () => {
+      const { page, context } = await open('normal',true,'https://leetcode.cn/problems/two-sum/submissions/123/');
+      await page.waitForTimeout(100);
+      await page.evaluate(()=>{
+        document.querySelector('h1 a').remove();
+        history.replaceState({},'', '/problems/two-sum/');
+      });
+      await ready(page);
+      assert.equal(await page.evaluate(()=>fixture.resets),0);
+      assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).opacity),'1');
+      await context.close();
+    });
+
+    await t.test("same-question URL updates do not restart an explicitly paused page", async () => {
+      const { page, context } = await open('no-reset');
+      await page.waitForFunction(()=>fixture.confirms===1);
+      await page.evaluate(()=>harness.command('LCR_PAUSE_TAB'));
+      await page.evaluate(()=>history.replaceState({result:true},'',location.href+'?result=accepted'));
+      await page.waitForTimeout(350);
+      assert.equal((await phase(page)).phase,'paused');
+      assert.equal(await page.evaluate(()=>fixture.resets),1);
+      assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).opacity),'1');
+      await context.close();
+    });
+
+    await t.test("initial late-draft checks stop once the initial loading window has passed", async () => {
+      const { page, context } = await open();
+      await ready(page);
+      await page.waitForTimeout(2700);
+      await page.evaluate(()=>fixture.setCode('CURRENT_CODE_AFTER_FOCUS_REVALIDATION'));
+      await page.waitForTimeout(250);
+      assert.equal(await page.evaluate(()=>fixture.resets),1);
+      assert.equal(await page.locator('.view-lines').textContent(),'CURRENT_CODE_AFTER_FOCUS_REVALIDATION');
+      await context.close();
+    });
+
+    await t.test("background timer throttling keeps the shield closed through the first foreground frame", async () => {
+      const { page, context } = await open('no-reset');
+      await page.waitForFunction(()=>fixture.confirms===1);
+      await page.evaluate(()=>{window.dispatchEvent(new Event('blur'));harness.stopControllerTimer();});
+      await page.waitForTimeout(2700);
+      assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).opacity),'0');
+      assert.equal(await page.locator('#lcr-recovery').count(),0);
+      const firstFrame=await page.evaluate(()=>{
+        window.dispatchEvent(new Event('focus'));
+        return new Promise(resolve=>requestAnimationFrame(()=>resolve(getComputedStyle(document.querySelector('.monaco-editor')).opacity)));
+      });
+      assert.equal(firstFrame,'0');
+      assert.equal(await page.evaluate(()=>fixture.oldVisible),false);
+      await context.close();
+    });
+
+    await t.test("back-forward cache restoration keeps newly typed code visible", async () => {
+      const { page, context } = await open();
+      await ready(page);
+      await page.locator('.monaco-editor').click();
+      await page.keyboard.press('Control+End');
+      await page.keyboard.type('// KEEP_ON_RETURN');
+      const code=await page.locator('.monaco-editor').textContent();
+      await page.evaluate(()=>{
+        window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));
+        window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));
+      });
+      await page.waitForTimeout(350);
+      assert.equal(await page.evaluate(()=>fixture.resets),1);
+      assert.equal(await page.locator('.monaco-editor').textContent(),code);
+      assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).opacity),'1');
+      await context.close();
+    });
+
+    await t.test("time spent away from the page does not consume the automatic-reset timeout", async () => {
+      const { page, context } = await open('no-reset');
+      await page.waitForFunction(()=>fixture.confirms===1);
+      await page.evaluate(()=>{
+        window.dispatchEvent(new Event('blur'));
+        const originalNow=Date.now.bind(Date);
+        Date.now=()=>originalNow()+30000;
+        window.dispatchEvent(new Event('focus'));
+      });
+      await page.waitForTimeout(200);
+      assert.equal((await phase(page)).phase,'resetting');
+      assert.equal(await page.locator('#lcr-recovery').count(),0);
+      assert.equal(await page.locator('.monaco-editor').evaluate(el=>getComputedStyle(el).opacity),'0');
+      await context.close();
+    });
+
+    await t.test("the shield does not blank other read-only code panels", async () => {
+      const { page, context } = await open('no-reset');
+      await page.waitForFunction(()=>fixture.confirms===1);
+      await page.evaluate(()=>{
+        const preview=document.createElement('div');preview.className='monaco-editor';preview.id='submission-preview';preview.textContent='Accepted submission';document.body.appendChild(preview);
+      });
+      assert.equal(await page.locator('#submission-preview').evaluate(el=>getComputedStyle(el).opacity),'1');
+      assert.equal(await page.locator('#editor .monaco-editor').evaluate(el=>getComputedStyle(el).opacity),'0');
+      await context.close();
+    });
+
     await t.test("a late cloud draft is hidden and reset again before a frame is painted", async () => {
       const { page, context } = await open();
       await ready(page);
@@ -314,7 +473,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       const { page, context } = await open("normal", false);
       await page.waitForTimeout(300);
       assert.equal((await phase(page)).phase, "idle");
-      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).visibility), "visible");
+      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).opacity), "1");
       assert.equal(await page.evaluate(() => fixture.resets), 0);
       await context.close();
     });
@@ -322,15 +481,15 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
     await t.test("a missing controller module releases the shield and reports recovery", async () => {
       const { page, context } = await open("normal", true, "https://leetcode.cn/problems/two-sum/", "no-controller");
       await page.locator("#lcr-recovery").waitFor({ timeout: 5000 });
-      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "visible");
+      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "1");
       assert.equal(await page.evaluate(() => fixture.resets), 0);
       await context.close();
     });
 
     await t.test("with no extension JavaScript at all, the CSS lease expires by itself", async () => {
       const { page, context } = await open("normal", true, "https://leetcode.cn/problems/two-sum/", "css-only");
-      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "hidden");
-      await page.waitForFunction(() => getComputedStyle(document.querySelector('.monaco-editor')).visibility === 'visible', null, {timeout:5000});
+      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "0");
+      await page.waitForFunction(() => getComputedStyle(document.querySelector('.monaco-editor')).opacity === '1', null, {timeout:5000});
       assert.equal(await page.evaluate(() => fixture.resets), 0);
       await context.close();
     });
@@ -351,7 +510,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
     await t.test("storage failure recovers instead of permanently hiding the editor", async () => {
       const { page, context } = await open("normal", true, "https://leetcode.cn/problems/two-sum/", "storage-error");
       await page.locator("#lcr-recovery").waitFor({ timeout: 5000 });
-      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "visible");
+      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "1");
       assert.equal(await page.evaluate(() => fixture.resets), 0);
       await context.close();
     });
@@ -360,7 +519,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       const { page, context } = await open("normal", true, "https://leetcode.cn/problems/two-sum/", "partial-startup");
       await page.locator("#lcr-recovery").waitFor({ timeout: 5000 });
       await page.waitForTimeout(1000);
-      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "visible");
+      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "1");
       assert.equal(await page.evaluate(() => fixture.resets), 0);
       await context.close();
     });
@@ -372,7 +531,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       await page.locator("#next").click();
       await page.evaluate(() => harness.configure(false));
       await page.waitForFunction(() => fixture.slug==='add-two-numbers');
-      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "visible");
+      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "1");
       assert.equal(await page.evaluate(() => fixture.resets), 0);
       await context.close();
     });
@@ -382,7 +541,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       await page.waitForFunction(() => fixture.confirms===1);
       await page.evaluate(() => harness.invalidate());
       await page.locator("#lcr-recovery").waitFor({ timeout: 5000 });
-      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).visibility), "visible");
+      assert.equal(await page.locator(".monaco-editor").evaluate(el=>getComputedStyle(el).opacity), "1");
       await page.waitForTimeout(500);
       assert.equal(await page.evaluate(() => fixture.resets), 1, "An aborted controller must not restart");
       await context.close();
@@ -393,7 +552,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       await page.waitForTimeout(300);
       assert.equal((await phase(page)).phase, "idle");
       assert.equal(await page.evaluate(() => fixture.resets), 0);
-      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).visibility), "visible");
+      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).opacity), "1");
       await context.close();
     });
 
@@ -405,7 +564,7 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       await page.waitForFunction(() => location.pathname.includes("add-two-numbers"));
       await page.waitForTimeout(250);
       assert.equal(await page.evaluate(() => fixture.resets), 0, "Do not reset the still-mounted previous editor");
-      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).visibility), "hidden");
+      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).opacity), "0");
       await ready(page);
       assert.equal(await page.evaluate(() => fixture.documentMarker), marker, "The original document survives navigation");
       assert.equal(await page.evaluate(() => fixture.resets), 1);
@@ -436,11 +595,11 @@ test("browser behavior with an offline LeetCode-shaped fixture", { timeout: 1200
       const { page, context } = await open("no-reset");
       await page.waitForFunction(() => harness.status()?.phase === "error", null, { timeout: 25000 });
       assert.equal(await page.evaluate(() => fixture.oldVisible), false);
-      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).visibility), "hidden");
+      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).opacity), "0");
       assert.equal(await page.evaluate(() => fixture.resets), 1);
       await page.evaluate(() => harness.command("LCR_PAUSE_TAB"));
       assert.equal((await phase(page)).phase, "paused");
-      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).visibility), "visible");
+      assert.equal(await page.locator(".monaco-editor").evaluate((el) => getComputedStyle(el).opacity), "1");
       await page.evaluate(() => { fixture.mode="normal"; return harness.command("LCR_RETRY"); });
       await ready(page);
       assert.equal(await page.evaluate(() => fixture.resets), 2);

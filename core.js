@@ -12,6 +12,17 @@
     }
   }
 
+  // Question identity survives switching between its description, result,
+  // solution and submissions views. Only problemFromUrl authorizes a reset.
+  function questionFromUrl(value) {
+    try {
+      const url = new URL(value, "https://leetcode.cn");
+      if (url.origin !== "https://leetcode.cn") return null;
+      const match = url.pathname.match(/^\/problems\/([^/]+)(?:\/|$)/);
+      return match ? decodeURIComponent(match[1]) : null;
+    } catch { return null; }
+  }
+
   function normalizeCode(value) {
     return String(value || "").replace(/[\s\u00a0\u200b\u200c\u200d\ufeff]/g, "");
   }
@@ -45,7 +56,7 @@
     return found;
   }
 
-  const api = { problemFromUrl, normalizeCode, validSnippets, collectTemplates };
+  const api = { problemFromUrl, questionFromUrl, normalizeCode, validSnippets, collectTemplates };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.LeetcodeClearCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

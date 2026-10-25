@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "minimum_chrome_version": "111",
   "name": "leetcode重做助手",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "力扣中国站本地复习工具：只恢复有改动的代码，保留未改动模板；切题不额外刷新页面。会覆盖已有代码草稿。",
   "permissions": ["storage"],
   "icons": {
